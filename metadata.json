@@ -1,0 +1,8 @@
+{
+  "name": "Remix CPU Scheduler Comparator",
+  "description": "Compare FCFS, SJF, SRTF, Round Robin, and Priority CPU scheduling algorithms side by side with interactive step playback, ready queue inspector, quantum sensitivity analyzer, Plotly analytics, and Gantt charts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
