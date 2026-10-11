@@ -1,14 +1,15 @@
 {
-  "name": "react-example",
+  "name": "cpu-scheduler-comparator",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
     "start": "tsx server.ts",
+    "test": "tsx --test test/scheduler.test.ts",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "node -e \"import('fs').then(fs => { fs.rmSync('dist', { recursive: true, force: true }); fs.rmSync('server.js', { force: true }); })\"",
     "lint": "tsc --noEmit"
   },
   "dependencies": {

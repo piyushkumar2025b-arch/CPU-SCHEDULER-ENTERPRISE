@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AllResults, AlgorithmKey, ProcessInput } from '../types';
 import { ALGO_NAMES, ALGO_COLORS } from './GanttChart';
 import { WorkloadFingerprint } from '../utils/workloadFingerprint';
@@ -34,6 +34,13 @@ export const AIInsightPanel: React.FC<AIInsightPanelProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showRawContext, setShowRawContext] = useState<boolean>(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const algoKeys: AlgorithmKey[] = ['fcfs', 'sjf', 'srtf', 'rr', 'priority', 'pprior'];
 
@@ -170,14 +177,14 @@ RECOMMENDATION ACCURACY: ${accuracyText}`;
     setIsAssembling(true);
 
     // UX feature: Show RAG assembly animation for 1.5s
-    setTimeout(async () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(async () => {
       setIsAssembling(false);
       setIsLoading(true);
 
       try {
         const savedProvider = localStorage.getItem('remix_selected_ai_provider') || 'gemini';
         const savedModel = localStorage.getItem('remix_selected_ai_model');
-        const savedKey = localStorage.getItem('remix_openrouter_api_key');
 
         const response = await fetch('/api/generate-insights', {
           method: 'POST',
@@ -186,7 +193,6 @@ RECOMMENDATION ACCURACY: ${accuracyText}`;
             context: contextDocument,
             provider: savedProvider,
             model: savedModel || undefined,
-            openRouterApiKey: savedKey || undefined,
           }),
         });
 

@@ -123,7 +123,11 @@ export const NLPProcessInput: React.FC<NLPProcessInputProps> = ({ onWorkloadPars
       const savedTasksJson = localStorage.getItem(DRAFT_TASKS_KEY);
       const savedProvider = localStorage.getItem(SELECTED_PROVIDER_STORAGE) as 'gemini' | 'openrouter' | 'heuristic' | null;
       const savedModel = localStorage.getItem(SELECTED_MODEL_STORAGE);
-      const savedKey = localStorage.getItem(OPENROUTER_KEY_STORAGE);
+      try {
+        localStorage.removeItem(OPENROUTER_KEY_STORAGE);
+      } catch {
+        // Ignore
+      }
 
       if (savedPrompt) setPromptText(savedPrompt);
       if (savedTasksJson) {
@@ -137,7 +141,7 @@ export const NLPProcessInput: React.FC<NLPProcessInputProps> = ({ onWorkloadPars
         setProvider(savedProvider);
       }
       if (savedModel) setSelectedModel(savedModel);
-      if (savedKey) setOpenRouterApiKey(savedKey);
+      // Note: OpenRouter API key is kept ephemeral in session memory only (CPU-005)
     } catch {
       // Ignore
     }
@@ -193,11 +197,7 @@ export const NLPProcessInput: React.FC<NLPProcessInputProps> = ({ onWorkloadPars
 
   const handleApiKeyChange = (key: string) => {
     setOpenRouterApiKey(key);
-    try {
-      localStorage.setItem(OPENROUTER_KEY_STORAGE, key);
-    } catch {
-      // Ignore
-    }
+    // Ephemeral in-memory only (CPU-005): Never store API key in browser localStorage
   };
 
   const handleTextChange = (text: string) => {
@@ -800,7 +800,7 @@ export const NLPProcessInput: React.FC<NLPProcessInputProps> = ({ onWorkloadPars
                   </button>
                 </div>
                 <span style={{ fontSize: '0.68rem', color: 'var(--dim)' }}>
-                  Stored securely in browser local storage
+                  Ephemeral in-memory session only; never stored in browser storage
                 </span>
               </div>
             </div>
@@ -1175,282 +1175,6 @@ export const NLPProcessInput: React.FC<NLPProcessInputProps> = ({ onWorkloadPars
         >
           <CheckCircle2 size={15} style={{ flexShrink: 0 }} />
           <span>{statusMsg}</span>
-        </div>
-      )}
-
-      {/* Interactive Extracted Tasks Inspector (Cards View) */}
-      {extractedTasks.length > 0 && (
-        <div
-          style={{
-            background: 'var(--surface-secondary)',
-            borderTop: '1px solid var(--border)',
-            borderRight: '1px solid var(--border)',
-            borderBottom: '1px solid var(--border)',
-            borderLeft: '1px solid var(--border)',
-            borderRadius: '6px',
-            padding: '0.75rem',
-            marginBottom: '0.75rem',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '0.55rem',
-              flexWrap: 'wrap',
-              gap: '0.5rem',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span
-                style={{
-                  fontSize: '0.74rem',
-                  fontWeight: 700,
-                  color: 'var(--text)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                }}
-              >
-                Synthesized Tasks ({extractedTasks.length}):
-              </span>
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontFamily: 'IBM Plex Mono, monospace',
-                  padding: '1px 6px',
-                  borderRadius: '10px',
-                  background: 'var(--surface)',
-                  color: 'var(--dim)',
-                  border: '1px solid var(--border)',
-                }}
-              >
-                Total Burst: {totalBurst}ms | Avg: {avgBurst}ms | Dominant: {dominantType}
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <button
-                type="button"
-                onClick={handleAddManualTask}
-                style={{
-                  background: 'var(--surface)',
-                  color: 'var(--text)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '4px',
-                  padding: '0.25rem 0.55rem',
-                  fontSize: '0.7rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.3rem',
-                }}
-              >
-                <Plus size={11} />
-                <span>Add Task</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => applyTasksToSimulation(extractedTasks)}
-                style={{
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  padding: '0.25rem 0.65rem',
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.3rem',
-                }}
-              >
-                <CheckCircle2 size={11} />
-                <span>Sync to Simulator</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Task Pills / Edit Row */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            {extractedTasks.map((t, idx) => {
-              const tColor = PROCESS_TYPE_COLORS[t.type] || PROCESS_TYPE_COLORS['cpu-bound'];
-              const isNewlyAdded = newlyAddedIndices.has(idx);
-
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    fontSize: '0.72rem',
-                    background: tColor.bg,
-                    borderTop: `1px solid ${isNewlyAdded ? 'var(--accent)' : tColor.border}`,
-                    borderRight: `1px solid ${isNewlyAdded ? 'var(--accent)' : tColor.border}`,
-                    borderBottom: `1px solid ${isNewlyAdded ? 'var(--accent)' : tColor.border}`,
-                    borderLeft: `3px solid ${isNewlyAdded ? 'var(--accent)' : tColor.border}`,
-                    borderRadius: '5px',
-                    padding: '4px 8px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    boxShadow: isNewlyAdded ? '0 0 6px rgba(79, 142, 247, 0.3)' : 'none',
-                  }}
-                >
-                  <strong style={{ fontFamily: 'IBM Plex Mono, monospace', color: tColor.text }}>
-                    P{idx}
-                  </strong>
-
-                  {/* Task Name Input */}
-                  <input
-                    type="text"
-                    value={t.name}
-                    onChange={(e) => handleUpdateTask(idx, 'name', e.target.value)}
-                    style={{
-                      background: 'rgba(0, 0, 0, 0.15)',
-                      border: 'none',
-                      borderRadius: '3px',
-                      color: 'var(--text)',
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      padding: '2px 5px',
-                      width: '100px',
-                      outline: 'none',
-                    }}
-                    title="Click to rename task"
-                  />
-
-                  {/* Type Select */}
-                  <select
-                    value={t.type}
-                    onChange={(e) => handleUpdateTask(idx, 'type', e.target.value)}
-                    style={{
-                      background: 'rgba(0,0,0,0.2)',
-                      color: tColor.text,
-                      border: 'none',
-                      borderRadius: '3px',
-                      fontSize: '0.68rem',
-                      fontWeight: 700,
-                      padding: '1px 3px',
-                      outline: 'none',
-                      cursor: 'pointer',
-                      fontFamily: 'IBM Plex Mono, monospace',
-                    }}
-                  >
-                    <option value="interactive">interactive</option>
-                    <option value="cpu-bound">cpu-bound</option>
-                    <option value="io-bound">io-bound</option>
-                    <option value="batch">batch</option>
-                    <option value="realtime">realtime</option>
-                  </select>
-
-                  {/* Burst Input */}
-                  <span style={{ color: 'var(--dim)', fontFamily: 'IBM Plex Mono, monospace' }}>
-                    BT:
-                    <input
-                      type="number"
-                      min="1"
-                      max="20"
-                      value={t.burst}
-                      onChange={(e) => handleUpdateTask(idx, 'burst', Math.max(1, +e.target.value))}
-                      style={{
-                        width: '32px',
-                        background: 'rgba(0,0,0,0.15)',
-                        border: 'none',
-                        borderRadius: '2px',
-                        color: 'var(--text)',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        textAlign: 'center',
-                        marginLeft: '2px',
-                      }}
-                      title="CPU Burst Time (ms)"
-                    />
-                  </span>
-
-                  {/* Priority Input */}
-                  <span style={{ color: 'var(--dim)', fontFamily: 'IBM Plex Mono, monospace' }}>
-                    Prio:
-                    <input
-                      type="number"
-                      min="1"
-                      max="5"
-                      value={t.priority}
-                      onChange={(e) => handleUpdateTask(idx, 'priority', Math.max(1, Math.min(5, +e.target.value)))}
-                      style={{
-                        width: '28px',
-                        background: 'rgba(0,0,0,0.15)',
-                        border: 'none',
-                        borderRadius: '2px',
-                        color: 'var(--text)',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        textAlign: 'center',
-                        marginLeft: '2px',
-                      }}
-                      title="Urgency (1=Highest, 5=Lowest)"
-                    />
-                  </span>
-
-                  {/* Arrival Input */}
-                  <span style={{ color: 'var(--dim)', fontFamily: 'IBM Plex Mono, monospace' }}>
-                    AT:
-                    <input
-                      type="number"
-                      min="0"
-                      value={t.arrival}
-                      onChange={(e) => handleUpdateTask(idx, 'arrival', Math.max(0, +e.target.value))}
-                      style={{
-                        width: '30px',
-                        background: 'rgba(0,0,0,0.15)',
-                        border: 'none',
-                        borderRadius: '2px',
-                        color: 'var(--text)',
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        textAlign: 'center',
-                        marginLeft: '2px',
-                      }}
-                      title="Arrival Time Offset"
-                    />
-                  </span>
-
-                  {isNewlyAdded && (
-                    <span
-                      style={{
-                        fontSize: '0.62rem',
-                        background: 'var(--accent)',
-                        color: '#fff',
-                        borderRadius: '3px',
-                        padding: '1px 4px',
-                        fontWeight: 700,
-                      }}
-                    >
-                      NEW
-                    </span>
-                  )}
-
-                  {/* Delete Button */}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveTask(idx)}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: 'var(--dim)',
-                      cursor: 'pointer',
-                      padding: '1px 3px',
-                      fontSize: '0.75rem',
-                    }}
-                    title="Remove this task"
-                  >
-                    <Trash2 size={11} />
-                  </button>
-                </div>
-              );
-            })}
-          </div>
         </div>
       )}
 

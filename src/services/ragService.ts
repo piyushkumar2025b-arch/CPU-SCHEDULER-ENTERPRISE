@@ -44,12 +44,18 @@ export interface RAGKnowledgeTopic {
 }
 
 export async function queryRAGBackend(params: RAGQueryParams): Promise<RAGResponse> {
+  // Purge any legacy key stored in localStorage (CPU-005)
+  try {
+    localStorage.removeItem('remix_openrouter_api_key');
+  } catch {
+    // Ignore storage errors in restricted contexts
+  }
+
   const savedProvider = (localStorage.getItem('remix_selected_ai_provider') || 'gemini') as
     | 'gemini'
     | 'openrouter'
     | 'heuristic';
   const savedModel = localStorage.getItem('remix_selected_ai_model') || undefined;
-  const savedKey = localStorage.getItem('remix_openrouter_api_key') || undefined;
 
   const response = await fetch('/api/rag/query', {
     method: 'POST',
@@ -60,7 +66,6 @@ export async function queryRAGBackend(params: RAGQueryParams): Promise<RAGRespon
       ...params,
       provider: savedProvider,
       model: savedModel,
-      openRouterApiKey: savedKey,
     }),
   });
 

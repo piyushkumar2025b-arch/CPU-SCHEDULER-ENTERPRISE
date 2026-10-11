@@ -1,7 +1,9 @@
 import { ProcessInput, AlgorithmKey } from '../types';
+import { validateWorkload } from '../scheduler';
 
 export interface QueuedProcess {
   pid: number;
+  id?: number;
   remainingBT: number;
   totalBT: number;
   arrival: number;
@@ -11,6 +13,7 @@ export interface QueuedProcess {
 
 export interface CompletedProcess {
   pid: number;
+  id?: number;
   completionTime: number;
   tat: number;
   wt: number;
@@ -21,7 +24,7 @@ export interface StepSnapshot {
   running: QueuedProcess | null; // null if idle
   readyQueue: QueuedProcess[];
   completed: CompletedProcess[];
-  future: { pid: number; arrival: number; burst: number; priority: number }[];
+  future: { pid: number; id?: number; arrival: number; burst: number; priority: number }[];
   event: string;
 }
 
@@ -36,8 +39,17 @@ export function generateStepTrace(
 ): StepSnapshot[] {
   if (!processes.length) return [];
 
+  const validation = validateWorkload(processes, algo === 'rr' ? quantum : undefined);
+  if (!validation.ok) {
+    throw new Error(validation.error || 'Invalid workload provided to step simulator.');
+  }
+
+  const validProcs = validation.validatedProcesses;
+  const safeQuantum = validation.validatedQuantum;
+
   interface PState {
     pid: number;
+    id: number;
     arrival: number;
     burst: number;
     priority: number;
@@ -46,8 +58,9 @@ export function generateStepTrace(
     finishTime: number | null;
   }
 
-  const procs: PState[] = processes.map((p, i) => ({
+  const procs: PState[] = validProcs.map((p, i) => ({
     pid: i,
+    id: p.id,
     arrival: p.arrival,
     burst: p.burst,
     priority: p.priority,
@@ -56,9 +69,10 @@ export function generateStepTrace(
     finishTime: null,
   }));
 
+  const safeQuantum = Math.max(1, Math.floor(Number(quantum) || 1));
   const totalBurst = procs.reduce((acc, p) => acc + p.burst, 0);
   const maxArrival = Math.max(...procs.map((p) => p.arrival), 0);
-  const maxSimTime = maxArrival + totalBurst + 50;
+  const maxSimTime = maxArrival + totalBurst * 10 + 1000;
 
   const snapshots: StepSnapshot[] = [];
 
@@ -68,7 +82,7 @@ export function generateStepTrace(
 
   // Algorithm specific state
   let currentRunning: PState | null = null;
-  let currentQuantumLeft = quantum;
+  let currentQuantumLeft = safeQuantum;
   const readyQueue: PState[] = [];
   const completed: CompletedProcess[] = [];
 
@@ -81,6 +95,7 @@ export function generateStepTrace(
       running: currentRunning
         ? {
             pid: currentRunning.pid,
+            id: currentRunning.id,
             remainingBT: currentRunning.remaining,
             totalBT: currentRunning.burst,
             arrival: currentRunning.arrival,
@@ -90,6 +105,7 @@ export function generateStepTrace(
         : null,
       readyQueue: readyQueue.map((p) => ({
         pid: p.pid,
+        id: p.id,
         remainingBT: p.remaining,
         totalBT: p.burst,
         arrival: p.arrival,
@@ -102,6 +118,7 @@ export function generateStepTrace(
         .sort((a, b) => a.arrival - b.arrival)
         .map((p) => ({
           pid: p.pid,
+          id: p.id,
           arrival: p.arrival,
           burst: p.burst,
           priority: p.priority,
@@ -161,7 +178,7 @@ export function generateStepTrace(
         }
       } else if (algo === 'rr') {
         if (currentQuantumLeft <= 0) {
-          eventLog += `Quantum (${quantum}) expired for P${currentRunning.pid}. `;
+          eventLog += `Quantum (${safeQuantum}) expired for P${currentRunning.pid}. `;
           readyQueue.push(currentRunning);
           currentRunning = null;
         }
@@ -172,7 +189,7 @@ export function generateStepTrace(
     if (!currentRunning) {
       if (readyQueue.length > 0) {
         currentRunning = readyQueue.shift()!;
-        currentQuantumLeft = quantum;
+        currentQuantumLeft = safeQuantum;
         if (currentRunning.firstRun === null) {
           currentRunning.firstRun = time;
         }
@@ -199,6 +216,7 @@ export function generateStepTrace(
         const wt = tat - currentRunning.burst;
         completed.push({
           pid: currentRunning.pid,
+          id: currentRunning.id,
           completionTime: time,
           tat,
           wt,
@@ -210,8 +228,12 @@ export function generateStepTrace(
     }
   }
 
-  // Final snapshot at completion
-  snapshots.push(getSnapshot(`Simulation concluded at t=${time}. All processes finished.`));
+  // Final snapshot with invariant verification
+  if (doneCount === n) {
+    snapshots.push(getSnapshot(`Simulation concluded at t=${time}. All processes finished.`));
+  } else {
+    snapshots.push(getSnapshot(`Simulation halted at safety limit t=${time} before all processes completed (${doneCount}/${n} finished).`));
+  }
 
   return snapshots;
 }

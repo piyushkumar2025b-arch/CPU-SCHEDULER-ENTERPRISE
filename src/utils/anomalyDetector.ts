@@ -10,6 +10,19 @@ export interface DetectedAnomaly {
   mitigation: string;
 }
 
+/**
+ * Standardized heuristic thresholds for CPU scheduling anomaly detection (CPU-019).
+ */
+export const ANOMALY_THRESHOLDS = {
+  CONVOY_BURST_MULTIPLIER: 1.8,
+  CONVOY_MIN_SHORT_TASKS: 2,
+  SRTF_SWITCHES_PER_TASK: 2.5,
+  RR_SWITCHES_PER_TASK: 3.0,
+  STARVATION_WAIT_MULTIPLIER: 3.5,
+  STARVATION_MIN_WAIT: 15,
+  JITTER_THRESHOLD_MS: 25,
+} as const;
+
 export function detectAnomalies(
   processes: ProcessInput[],
   results: AllResults,
@@ -23,13 +36,16 @@ export function detectAnomalies(
   const bursts = processes.map((p) => p.burst);
   const avgBurst = bursts.reduce((a, b) => a + b, 0) / n;
   const maxBurst = Math.max(...bursts);
-  const minBurst = Math.min(...bursts);
 
   // 1. Convoy Effect in FCFS
   const sortedByArrival = [...processes].sort((a, b) => a.arrival - b.arrival || a.id - b.id);
   const firstP = sortedByArrival[0];
-  const laterShorterCount = sortedByArrival.slice(1).filter((p) => p.burst < firstP.burst / 2).length;
-  if (firstP && firstP.burst > avgBurst * 1.8 && laterShorterCount >= 2) {
+  const firstPCompletion = firstP ? firstP.arrival + firstP.burst : 0;
+  const convoyContenders = sortedByArrival.slice(1).filter(
+    (p) => p.burst < firstP.burst / 2 && p.arrival < firstPCompletion
+  );
+  const laterShorterCount = convoyContenders.length;
+  if (firstP && firstP.burst > avgBurst * ANOMALY_THRESHOLDS.CONVOY_BURST_MULTIPLIER && laterShorterCount >= ANOMALY_THRESHOLDS.CONVOY_MIN_SHORT_TASKS) {
     const firstPIndex = processes.findIndex((p) => p.id === firstP.id);
     const pName = processNames?.[firstPIndex] || `Task ${firstP.id}`;
     anomalies.push({
@@ -44,7 +60,7 @@ export function detectAnomalies(
   }
 
   // 2. Extreme Context Switching Overhead (SRTF / RR)
-  if (results.srtf && results.srtf.ctxSwitches > n * 2.5) {
+  if (results.srtf && results.srtf.ctxSwitches > n * ANOMALY_THRESHOLDS.SRTF_SWITCHES_PER_TASK) {
     anomalies.push({
       id: 'srtf-thrashing',
       title: 'High Preemption Overhead in SRTF',
@@ -56,7 +72,7 @@ export function detectAnomalies(
     });
   }
 
-  if (results.rr && results.rr.ctxSwitches > n * 3) {
+  if (results.rr && results.rr.ctxSwitches > n * ANOMALY_THRESHOLDS.RR_SWITCHES_PER_TASK) {
     anomalies.push({
       id: 'rr-quantum-churn',
       title: 'Round Robin Quantum Churn',
@@ -76,26 +92,29 @@ export function detectAnomalies(
       severity: 'info',
       algorithm: 'rr',
       metric: `q=${quantum} ≥ max burst (${maxBurst}ms)`,
-      description: 'The configured quantum equals or exceeds the maximum process burst. No preemption occurs; RR behaves identically to FCFS.',
+      description: 'The configured quantum equals or exceeds the maximum process burst. No process requires multiple slices; RR executes identically to FCFS under this arrival order.',
       mitigation: `Reduce quantum below ${maxBurst} (recommended: ${Math.max(2, Math.round(avgBurst * 0.6))}) to enable responsive concurrency.`,
     });
   }
 
-  // 4. Starvation in Priority / Preemptive Priority
+  // 4. Starvation in Priority / Preemptive Priority (CPU-018: robust identity lookup)
   (['priority', 'pprior'] as AlgorithmKey[]).forEach((algoKey) => {
     const res = results[algoKey];
     if (!res) return;
     res.stats.forEach((st) => {
-      const p = processes.find((proc) => proc.id === st.idx) ?? processes[st.idx];
+      // Find matching process by stable ID first, then array index
+      const p = processes.find((proc) => proc.id === (st.id ?? st.idx)) ?? processes[st.idx];
       const pIdx = st.idx;
-      if (p && st.WT > p.burst * 3.5 && st.WT > 15) {
+      const pId = st.id ?? p?.id ?? pIdx;
+      if (p && st.WT > p.burst * ANOMALY_THRESHOLDS.STARVATION_WAIT_MULTIPLIER && st.WT > ANOMALY_THRESHOLDS.STARVATION_MIN_WAIT) {
+        const pName = processNames?.[pIdx] || `Task ${pId}`;
         anomalies.push({
-          id: `starvation-${algoKey}-p${pIdx}`,
-          title: `Severe Starvation for P${pIdx} under ${algoKey.toUpperCase()}`,
+          id: `starvation-${algoKey}-p${pId}`,
+          title: `Severe Starvation for P${pId} under ${algoKey.toUpperCase()}`,
           severity: 'critical',
           algorithm: algoKey,
           metric: `Wait Time: ${st.WT}ms (${(st.WT / p.burst).toFixed(1)}x burst)`,
-          description: `Process P${pIdx} (${processNames?.[pIdx] || `Task ${pIdx}`}) suffered prolonged starvation due to higher-urgency processes preempting the core.`,
+          description: `Process P${pId} (${pName}) suffered prolonged starvation due to higher-urgency processes preempting the core.`,
           mitigation: 'Implement dynamic aging (increasing priority by 1 every 5-10 time units) or multi-level feedback queuing (MLFQ).',
         });
       }
@@ -109,7 +128,7 @@ export function detectAnomalies(
     const responseTimes = res.stats.map((s) => s.RT);
     const maxRT = Math.max(...responseTimes);
     const minRT = Math.min(...responseTimes);
-    if (maxRT - minRT > 25 && n >= 4) {
+    if (maxRT - minRT > ANOMALY_THRESHOLDS.JITTER_THRESHOLD_MS && n >= 4) {
       anomalies.push({
         id: `jitter-${algoKey}`,
         title: `High Response Jitter in ${algoKey.toUpperCase()}`,
@@ -122,7 +141,7 @@ export function detectAnomalies(
     }
   });
 
-  // Deduplicate anomalies by title
+  // Deduplicate anomalies by ID
   const seen = new Set<string>();
   return anomalies.filter((a) => {
     if (seen.has(a.id)) return false;

@@ -13,12 +13,20 @@ export interface GanttSegment {
 
 export interface ProcessStat {
   idx: number;
+  id?: number;
   AT: number;
   BT: number;
   CT: number;
   TAT: number;
   WT: number;
   RT: number;
+}
+
+export interface WorkloadValidationResult {
+  ok: boolean;
+  error?: string;
+  validatedProcesses: ProcessInput[];
+  validatedQuantum: number;
 }
 
 export interface SimulationResult {

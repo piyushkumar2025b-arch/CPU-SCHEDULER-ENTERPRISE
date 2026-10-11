@@ -181,7 +181,9 @@ export const FormDataViewer: React.FC<FormDataViewerProps> = ({
           contextSwitches: currentResult.ctxSwitches,
         },
         processes: currentResult.stats.map((s) => ({
-          process: `P${s.idx}`,
+          id: s.id ?? s.idx,
+          label: `P${s.id ?? s.idx}`,
+          name: processNames?.[s.idx] || `Task ${s.id ?? s.idx}`,
           arrival: s.AT,
           burst: s.BT,
           completion: s.CT,
@@ -193,9 +195,10 @@ export const FormDataViewer: React.FC<FormDataViewerProps> = ({
       };
       text = JSON.stringify(exportObj, null, 2);
     } else {
-      const headers = ['PID', 'Arrival', 'Burst', 'Priority', 'Start', 'Completion', 'TAT', 'WT', 'RT', 'TAT/BT'];
+      const headers = ['ID', 'Label', 'Arrival', 'Burst', 'Priority', 'Start', 'Completion', 'TAT', 'WT', 'RT', 'TAT/BT'];
       const rows = processedRows.map((r) => [
-        `P${r.idx}`,
+        r.id ?? r.idx,
+        `P${r.id ?? r.idx}`,
         r.AT,
         r.BT,
         r.priority,
@@ -209,10 +212,21 @@ export const FormDataViewer: React.FC<FormDataViewerProps> = ({
       text = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
     }
 
-    navigator.clipboard.writeText(text).then(() => {
-      setCopiedStatus(format.toUpperCase());
-      setTimeout(() => setCopiedStatus(null), 2000);
-    });
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(text)
+        .then(() => {
+          setCopiedStatus(format.toUpperCase());
+          setTimeout(() => setCopiedStatus(null), 2000);
+        })
+        .catch(() => {
+          setCopiedStatus('ERROR');
+          setTimeout(() => setCopiedStatus(null), 2500);
+        });
+    } else {
+      setCopiedStatus('UNSUPPORTED');
+      setTimeout(() => setCopiedStatus(null), 2500);
+    }
   };
 
   return (

@@ -77,6 +77,16 @@ function roundRectPath(
   ctx.closePath();
 }
 
+export interface GanttTooltipInfo {
+  isIdle: boolean;
+  pid?: number;
+  taskTitle?: string;
+  start: number;
+  end: number;
+  duration: number;
+  color?: string;
+}
+
 interface SingleGanttProps {
   algoKey: AlgorithmKey;
   result: AllResults[AlgorithmKey];
@@ -84,7 +94,7 @@ interface SingleGanttProps {
   processNames?: string[];
   highlightedPid: number | null;
   onHoverPid: (pid: number | null) => void;
-  onTooltip: (content: string | null, x: number, y: number) => void;
+  onTooltip: (content: GanttTooltipInfo | null, x: number, y: number) => void;
   timeScale: number;
 }
 
@@ -336,16 +346,27 @@ const SingleGanttCanvas: React.FC<SingleGanttProps> = ({
       const dur = hit.end - hit.start;
       const color = P_COLORS[row % P_COLORS.length];
       const pName = processNames?.[row];
-      const html = `<b style="color:${color}">Task P${row}${pName ? ` — ${pName}` : ''}</b> &nbsp; [t=${hit.start} → t=${hit.end}] &nbsp; <span style="color:#94a3b8">${dur} unit${dur !== 1 ? 's' : ''} on CPU</span>`;
-      onTooltip(html, e.clientX + 14, e.clientY - 10);
+      onTooltip({
+        isIdle: false,
+        pid: row,
+        taskTitle: pName ? `Task P${row} — ${pName}` : `Task P${row}`,
+        start: hit.start,
+        end: hit.end,
+        duration: dur,
+        color,
+      }, e.clientX + 14, e.clientY - 10);
       return;
     }
 
     const idleHit = result.gantt.find((s) => s.pid === 'idle' && t >= s.start && t < s.end);
     if (idleHit) {
       onHoverPid(null);
-      const html = `<span style="color:#94a3b8">CPU Idle [t=${idleHit.start} → t=${idleHit.end}]</span>`;
-      onTooltip(html, e.clientX + 14, e.clientY - 10);
+      onTooltip({
+        isIdle: true,
+        start: idleHit.start,
+        end: idleHit.end,
+        duration: idleHit.end - idleHit.start,
+      }, e.clientX + 14, e.clientY - 10);
       return;
     }
 
@@ -453,17 +474,17 @@ export const GanttSection: React.FC<{
   processNames?: string[];
 }> = ({ results, processes, processNames }) => {
   const [tooltip, setTooltip] = useState<{
-    html: string | null;
+    info: GanttTooltipInfo | null;
     x: number;
     y: number;
-  }>({ html: null, x: 0, y: 0 });
+  }>({ info: null, x: 0, y: 0 });
 
   const [highlightedPid, setHighlightedPid] = useState<number | null>(null);
   const [selectedAlgoFilter, setSelectedAlgoFilter] = useState<AlgorithmKey | 'all'>('all');
   const [zoomLevel, setZoomLevel] = useState<number>(1);
 
-  const handleTooltip = (html: string | null, x: number, y: number) => {
-    setTooltip({ html, x, y });
+  const handleTooltip = (info: GanttTooltipInfo | null, x: number, y: number) => {
+    setTooltip({ info, x, y });
   };
 
   const allKeys: AlgorithmKey[] = ['fcfs', 'sjf', 'srtf', 'rr', 'priority', 'pprior'];
@@ -630,7 +651,7 @@ export const GanttSection: React.FC<{
         </div>
       )}
 
-      {tooltip.html && (
+      {tooltip.info && (
         <div
           className="gantt-tooltip"
           style={{
@@ -638,8 +659,23 @@ export const GanttSection: React.FC<{
             left: `${tooltip.x}px`,
             top: `${tooltip.y}px`,
           }}
-          dangerouslySetInnerHTML={{ __html: tooltip.html }}
-        />
+        >
+          {tooltip.info.isIdle ? (
+            <span style={{ color: '#94a3b8' }}>
+              CPU Idle [t={tooltip.info.start} → t={tooltip.info.end}]
+            </span>
+          ) : (
+            <>
+              <b style={{ color: tooltip.info.color }}>
+                {tooltip.info.taskTitle}
+              </b>
+              {' '}&nbsp; [t={tooltip.info.start} → t={tooltip.info.end}] &nbsp;{' '}
+              <span style={{ color: '#94a3b8' }}>
+                {tooltip.info.duration} unit{tooltip.info.duration !== 1 ? 's' : ''} on CPU
+              </span>
+            </>
+          )}
+        </div>
       )}
       <div className="gantt-wrap" id="ganttWrap">
         {visibleKeys.map((key) => (

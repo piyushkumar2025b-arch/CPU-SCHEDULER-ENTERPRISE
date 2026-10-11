@@ -5,9 +5,8 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { ProcessInput, AlgorithmKey, AllResults } from './types';
-import { simulateAll } from './scheduler';
+import { simulateAll, validateWorkload } from './scheduler';
 import { ALGO_COLORS, ALGO_NAMES, P_COLORS, GanttSection } from './components/GanttChart';
-import { ComparisonPlots } from './components/ComparisonCharts';
 import { BreakdownTable } from './components/BreakdownTable';
 import { PlotlyComparisons } from './components/PlotlyComparisons';
 import {
@@ -58,6 +57,22 @@ export default function App() {
   const [isRAGOpen, setIsRAGOpen] = useState<boolean>(false);
   const [ragInitialQuestion, setRagInitialQuestion] = useState<string | undefined>(undefined);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Synchronized snapshot of the workload that produced current simulation results (CSC-005)
+  const [simulatedSnapshot, setSimulatedSnapshot] = useState<{
+    processes: ProcessInput[];
+    quantum: number;
+    processNames: string[];
+    processTypes: string[];
+  }>({
+    processes: DEFAULT_PROCESSES,
+    quantum: DEFAULT_QUANTUM,
+    processNames: DEFAULT_PROCESSES.map((_, i) => `Task ${i}`),
+    processTypes: DEFAULT_PROCESSES.map((_, i) =>
+      i % 5 === 0 ? 'interactive' : i % 5 === 1 ? 'cpu-bound' : i % 5 === 2 ? 'io-bound' : i % 5 === 3 ? 'batch' : 'realtime'
+    ),
+  });
 
   const handleOpenRAG = (question?: string) => {
     setRagInitialQuestion(question);
@@ -84,6 +99,9 @@ export default function App() {
   // Compute initial simulation on mount
   useEffect(() => {
     executeSimulation(false);
+    return () => {
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    };
   }, []);
 
   const addProcess = () => {
@@ -166,17 +184,25 @@ export default function App() {
     setResults(allRes);
     setBestKey(winner);
     setSelectedInspectorAlgo(winner);
+    setSimulatedSnapshot({
+      processes: preset.processes,
+      quantum: preset.quantum,
+      processNames: preset.processes.map((_, i) => `Task ${i}`),
+      processTypes: preset.processes.map((_, i) =>
+        i % 5 === 0 ? 'interactive' : i % 5 === 1 ? 'cpu-bound' : i % 5 === 2 ? 'io-bound' : i % 5 === 3 ? 'batch' : 'realtime'
+      ),
+    });
   };
 
   const handleGenerateRandom = (count: number) => {
     const generated = generateRandomMultiProcessWorkload(count);
-    setProcesses(generated.processes);
-    setProcessNames(generated.processes.map((_, i) => `Task ${i}`));
-    setProcessTypes(
-      generated.processes.map((_, i) =>
-        i % 4 === 0 ? 'interactive' : i % 4 === 1 ? 'cpu-bound' : i % 4 === 2 ? 'batch' : 'io-bound'
-      )
+    const newNames = generated.processes.map((_, i) => `Task ${i}`);
+    const newTypes = generated.processes.map((_, i) =>
+      i % 4 === 0 ? 'interactive' : i % 4 === 1 ? 'cpu-bound' : i % 4 === 2 ? 'batch' : 'io-bound'
     );
+    setProcesses(generated.processes);
+    setProcessNames(newNames);
+    setProcessTypes(newTypes);
     setQuantum(generated.quantum);
     setNextId(generated.processes.length);
     setActivePresetId(null);
@@ -195,6 +221,12 @@ export default function App() {
     setResults(allRes);
     setBestKey(winner);
     setSelectedInspectorAlgo(winner);
+    setSimulatedSnapshot({
+      processes: generated.processes,
+      quantum: generated.quantum,
+      processNames: newNames,
+      processTypes: newTypes,
+    });
   };
 
   const handleNLPWorkloadParsed = (
@@ -222,13 +254,19 @@ export default function App() {
     setResults(allRes);
     setBestKey(winner);
     setSelectedInspectorAlgo(winner);
+    setSimulatedSnapshot({
+      processes: newProcs,
+      quantum,
+      processNames: newNames,
+      processTypes: newTypes,
+    });
   };
 
   const handleRandomizeBursts = () => {
     setActivePresetId(null);
-    const updated = processes.map((p) => ({
+    const updated = processes.map((p, idx) => ({
       ...p,
-      burst: Math.floor(Math.random() * 10) + 2, // 2 to 11
+      burst: ((p.id * 7 + idx * 3 + Date.now()) % 10) + 2,
     }));
     setProcesses(updated);
     const allRes = simulateAll(updated, quantum);
@@ -242,6 +280,12 @@ export default function App() {
     });
     setResults(allRes);
     setBestKey(winner);
+    setSimulatedSnapshot({
+      processes: updated,
+      quantum,
+      processNames: [...processNames],
+      processTypes: [...processTypes],
+    });
   };
 
   const handleResetDefault = () => {
@@ -252,64 +296,85 @@ export default function App() {
   const executeSimulation = (shouldScroll = true) => {
     setErrorMsg(null);
 
-    // Validate inputs
-    for (let i = 0; i < processes.length; i++) {
-      const p = processes[i];
-      if (isNaN(p.arrival) || p.arrival < 0) {
-        setErrorMsg(`P${i}: arrival must be ≥ 0`);
-        return;
-      }
-      if (isNaN(p.burst) || p.burst < 1) {
-        setErrorMsg(`P${i}: burst must be ≥ 1`);
-        return;
-      }
-      if (isNaN(p.priority) || p.priority < 1) {
-        setErrorMsg(`P${i}: priority must be ≥ 1`);
-        return;
-      }
-    }
-
-    if (isNaN(quantum) || quantum < 1) {
-      setErrorMsg('Round Robin quantum must be ≥ 1');
+    const validation = validateWorkload(processes, quantum);
+    if (!validation.ok) {
+      setErrorMsg(validation.error || 'Workload validation failed');
       return;
     }
 
-    const allRes = simulateAll(processes, quantum);
+    try {
+      const allRes = simulateAll(validation.validatedProcesses, validation.validatedQuantum);
 
-    // Determine winner (lowest avg wait time)
-    let winner: AlgorithmKey = 'fcfs';
-    let lowestWT = Infinity;
-    (Object.keys(allRes) as AlgorithmKey[]).forEach((key) => {
-      if (allRes[key].avgWT < lowestWT) {
-        lowestWT = allRes[key].avgWT;
-        winner = key;
+      // Determine winner (lowest avg wait time)
+      let winner: AlgorithmKey = 'fcfs';
+      let lowestWT = Infinity;
+      (Object.keys(allRes) as AlgorithmKey[]).forEach((key) => {
+        if (allRes[key].avgWT < lowestWT) {
+          lowestWT = allRes[key].avgWT;
+          winner = key;
+        }
+      });
+
+      setResults(allRes);
+      setBestKey(winner);
+      setSimulatedSnapshot({
+        processes: validation.validatedProcesses,
+        quantum: validation.validatedQuantum,
+        processNames: [...processNames],
+        processTypes: [...processTypes],
+      });
+
+      if (shouldScroll) {
+        if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 50);
       }
-    });
-
-    setResults(allRes);
-    setBestKey(winner);
-
-    if (shouldScroll) {
-      setTimeout(() => {
-        resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 50);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Simulation execution encountered an error');
     }
   };
 
   const handleApplyQuantum = (newQuantum: number) => {
-    setQuantum(newQuantum);
-    const allRes = simulateAll(processes, newQuantum);
-    let winner: AlgorithmKey = 'fcfs';
-    let lowestWT = Infinity;
-    (Object.keys(allRes) as AlgorithmKey[]).forEach((key) => {
-      if (allRes[key].avgWT < lowestWT) {
-        lowestWT = allRes[key].avgWT;
-        winner = key;
-      }
-    });
-    setResults(allRes);
-    setBestKey(winner);
+    const q = Math.max(1, Math.floor(newQuantum || 1));
+    setQuantum(q);
+    const validation = validateWorkload(processes, q);
+    if (!validation.ok) {
+      setErrorMsg(validation.error || 'Workload validation failed');
+      return;
+    }
+
+    try {
+      const allRes = simulateAll(validation.validatedProcesses, q);
+      let winner: AlgorithmKey = 'fcfs';
+      let lowestWT = Infinity;
+      (Object.keys(allRes) as AlgorithmKey[]).forEach((key) => {
+        if (allRes[key].avgWT < lowestWT) {
+          lowestWT = allRes[key].avgWT;
+          winner = key;
+        }
+      });
+      setResults(allRes);
+      setBestKey(winner);
+      setSimulatedSnapshot({
+        processes: validation.validatedProcesses,
+        quantum: q,
+        processNames: [...processNames],
+        processTypes: [...processTypes],
+      });
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Quantum sensitivity simulation encountered an error');
+    }
   };
+
+  const isWorkloadStale = useMemo(() => {
+    if (quantum !== simulatedSnapshot.quantum) return true;
+    if (processes.length !== simulatedSnapshot.processes.length) return true;
+    return processes.some((p, i) => {
+      const sp = simulatedSnapshot.processes[i];
+      return !sp || p.id !== sp.id || p.arrival !== sp.arrival || p.burst !== sp.burst || p.priority !== sp.priority;
+    });
+  }, [processes, quantum, simulatedSnapshot]);
 
   const algoKeys: AlgorithmKey[] = ['fcfs', 'sjf', 'srtf', 'rr', 'priority', 'pprior'];
 
@@ -1007,11 +1072,12 @@ export default function App() {
                         <input
                           id={`arr-input-${p.id}`}
                           type="number"
+                          step="1"
                           min="0"
                           value={p.arrival}
                           placeholder="0"
                           title="Arrival time offset in ms"
-                          onChange={(e) => updateProcess(idx, 'arrival', Math.max(0, +e.target.value))}
+                          onChange={(e) => updateProcess(idx, 'arrival', Math.max(0, Math.floor(+e.target.value || 0)))}
                         />
                       </div>
 
@@ -1022,11 +1088,12 @@ export default function App() {
                         <input
                           id={`burst-input-${p.id}`}
                           type="number"
+                          step="1"
                           min="1"
                           value={p.burst}
                           placeholder="4"
                           title="CPU burst execution time in ms"
-                          onChange={(e) => updateProcess(idx, 'burst', Math.max(1, +e.target.value))}
+                          onChange={(e) => updateProcess(idx, 'burst', Math.max(1, Math.floor(+e.target.value || 1)))}
                         />
                       </div>
 
@@ -1037,12 +1104,13 @@ export default function App() {
                         <input
                           id={`prio-input-${p.id}`}
                           type="number"
+                          step="1"
                           min="1"
                           max="5"
                           value={p.priority}
                           placeholder="1"
                           title="Urgency level (1 = Highest, 5 = Lowest)"
-                          onChange={(e) => updateProcess(idx, 'priority', Math.max(1, Math.min(5, +e.target.value)))}
+                          onChange={(e) => updateProcess(idx, 'priority', Math.max(1, Math.min(5, Math.floor(+e.target.value || 1))))}
                         />
                       </div>
                     </div>
@@ -1130,29 +1198,32 @@ export default function App() {
                         <td>
                           <input
                             type="number"
+                            step="1"
                             min="0"
                             value={p.arrival}
                             title="Arrival time in ms"
-                            onChange={(e) => updateProcess(idx, 'arrival', Math.max(0, +e.target.value))}
+                            onChange={(e) => updateProcess(idx, 'arrival', Math.max(0, Math.floor(+e.target.value || 0)))}
                           />
                         </td>
                         <td>
                           <input
                             type="number"
+                            step="1"
                             min="1"
                             value={p.burst}
                             title="Burst time in ms"
-                            onChange={(e) => updateProcess(idx, 'burst', Math.max(1, +e.target.value))}
+                            onChange={(e) => updateProcess(idx, 'burst', Math.max(1, Math.floor(+e.target.value || 1)))}
                           />
                         </td>
                         <td>
                           <input
                             type="number"
+                            step="1"
                             min="1"
                             max="5"
                             value={p.priority}
                             title="Priority (1 = Highest, 5 = Lowest)"
-                            onChange={(e) => updateProcess(idx, 'priority', Math.max(1, Math.min(5, +e.target.value)))}
+                            onChange={(e) => updateProcess(idx, 'priority', Math.max(1, Math.min(5, Math.floor(+e.target.value || 1))))}
                           />
                         </td>
                         <td>
@@ -1218,24 +1289,7 @@ export default function App() {
             </div>
           )}
 
-          {/* SYSTEM 2: AI Recommendation Panel (fingerprint + ranked scores) */}
-          <div id="ai-recommendation" style={{ marginTop: '1.25rem' }}>
-            <AIRecommendationPanel
-              fingerprint={fingerprint}
-              recommendation={recommendation}
-            />
-          </div>
-
-          {/* SYSTEM 3: Starvation Risk Report (collapsible) */}
-          <div id="starvation-report">
-            <StarvationRiskReport
-              starvationRisks={starvationRisks}
-              processNames={processNames}
-              onOpenRAG={handleOpenRAG}
-            />
-          </div>
-
-          {/* 5. Run Simulation button */}
+          {/* 5. Simulation Execution Controls (directly under processes specification) */}
           <div className="btn-row">
             <button
               type="button"
@@ -1252,10 +1306,11 @@ export default function App() {
               <input
                 id="quantum-input"
                 type="number"
+                step="1"
                 value={quantum}
                 min="1"
                 max="20"
-                onChange={(e) => setQuantum(+e.target.value)}
+                onChange={(e) => setQuantum(Math.max(1, Math.min(20, Math.floor(+e.target.value || 1))))}
               />
             </div>
             <button
@@ -1269,11 +1324,67 @@ export default function App() {
           </div>
         </div>
 
+        {/* WORKLOAD INTELLIGENCE & STARVATION AUDIT */}
+        <div style={{ marginBottom: '1.5rem' }}>
+          {/* SYSTEM 2: AI Recommendation Panel (fingerprint + ranked scores) */}
+          <div id="ai-recommendation">
+            <AIRecommendationPanel
+              fingerprint={fingerprint}
+              recommendation={recommendation}
+            />
+          </div>
+
+          {/* SYSTEM 3: Starvation Risk Report (collapsible) */}
+          <div id="starvation-report" style={{ marginTop: '1rem' }}>
+            <StarvationRiskReport
+              starvationRisks={starvationRisks}
+              processNames={processNames}
+              onOpenRAG={handleOpenRAG}
+            />
+          </div>
+        </div>
+
         {results && (
           <div id="results" ref={resultsRef}>
+            {isWorkloadStale && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'rgba(234, 179, 8, 0.1)',
+                  border: '1px solid rgba(234, 179, 8, 0.35)',
+                  borderRadius: '8px',
+                  padding: '0.75rem 1rem',
+                  marginBottom: '1rem',
+                  color: '#eab308',
+                  fontSize: '0.85rem',
+                  flexWrap: 'wrap',
+                  gap: '0.5rem',
+                }}
+              >
+                <span>
+                  Notice: Workload parameters were edited after the last benchmark. Results below correspond to the previously computed benchmark.
+                </span>
+                <button
+                  type="button"
+                  className="run-btn"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.78rem' }}
+                  onClick={() => executeSimulation(false)}
+                >
+                  <Play size={12} fill="currentColor" />
+                  <span>Update Benchmark</span>
+                </button>
+              </div>
+            )}
+
             {/* 6. Gantt Chart (updated with process names) */}
             <div id="gantt-timelines">
-              <GanttSection results={results} processes={processes} processNames={processNames} />
+              <GanttSection
+                results={results}
+                processes={simulatedSnapshot.processes}
+                processNames={simulatedSnapshot.processNames}
+              />
             </div>
 
             {/* 7. PerformanceSummaryCard (extended with 4 new metrics: JFI, Speedup, Starvation, Avg RR) */}
@@ -1416,9 +1527,9 @@ export default function App() {
               <AIInsightPanel
                 results={results}
                 fingerprint={fingerprint}
-                processes={processes}
-                processNames={processNames}
-                processTypes={processTypes}
+                processes={simulatedSnapshot.processes}
+                processNames={simulatedSnapshot.processNames}
+                processTypes={simulatedSnapshot.processTypes}
                 starvationRisks={starvationRisks}
                 recommendedWinner={recommendation.winner}
                 recommendationConfidence={recommendation.confidence}
@@ -1429,10 +1540,10 @@ export default function App() {
             {/* Anomaly & Inefficiency Auditor */}
             <div id="anomaly-audit">
               <AnomalyDashboard
-                processes={processes}
+                processes={simulatedSnapshot.processes}
                 results={results}
-                quantum={quantum}
-                processNames={processNames}
+                quantum={simulatedSnapshot.quantum}
+                processNames={simulatedSnapshot.processNames}
                 onOpenRAG={handleOpenRAG}
               />
             </div>
@@ -1440,9 +1551,9 @@ export default function App() {
             {/* 9. StepPlaybackInspector */}
             <div id="step-playback">
               <StepPlaybackInspector
-                processes={processes}
+                processes={simulatedSnapshot.processes}
                 results={results}
-                quantum={quantum}
+                quantum={simulatedSnapshot.quantum}
                 externalAlgo={selectedInspectorAlgo}
                 onAlgoChange={setSelectedInspectorAlgo}
               />
@@ -1452,7 +1563,7 @@ export default function App() {
             <div id="analytics-plots">
               <PlotlyComparisons
                 results={results}
-                processes={processes}
+                processes={simulatedSnapshot.processes}
                 bestKey={bestKey}
               />
             </div>
@@ -1460,8 +1571,8 @@ export default function App() {
             {/* 11. QuantumSensitivityAnalyzer */}
             <div id="quantum-optimizer">
               <QuantumSensitivityAnalyzer
-                processes={processes}
-                currentQuantum={quantum}
+                processes={simulatedSnapshot.processes}
+                currentQuantum={simulatedSnapshot.quantum}
                 onApplyQuantum={handleApplyQuantum}
                 onOpenRAG={handleOpenRAG}
               />
@@ -1470,73 +1581,29 @@ export default function App() {
             {/* 12. FormDataViewer (with 4th Metrics Comparison Tab) */}
             <FormDataViewer
               results={results}
-              processes={processes}
+              processes={simulatedSnapshot.processes}
               selectedAlgo={selectedInspectorAlgo}
               onSelectAlgo={setSelectedInspectorAlgo}
-              processNames={processNames}
-            />
-
-            <ComparisonPlots
-              results={results}
-              bestKey={bestKey}
-              processes={processes}
+              processNames={simulatedSnapshot.processNames}
             />
 
             {/* 13. BreakdownTable */}
             <div id="breakdown-table">
-              <BreakdownTable results={results} processes={processes} />
+              <BreakdownTable results={results} processes={simulatedSnapshot.processes} />
             </div>
           </div>
         )}
       </div>
 
-      {/* Floating Global RAG Copilot Launcher Button */}
-      <button
-        type="button"
-        onClick={() => handleOpenRAG()}
-        aria-label="Ask RAG OS Kernel Copilot"
-        title="Open interactive RAG Operating Systems Copilot"
-        style={{
-          position: 'fixed',
-          bottom: '22px',
-          right: '22px',
-          zIndex: 9000,
-          background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
-          color: '#ffffff',
-          border: '1px solid rgba(255, 255, 255, 0.25)',
-          borderRadius: '30px',
-          padding: '0.65rem 1.2rem',
-          boxShadow: '0 6px 20px rgba(37, 99, 235, 0.45)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.45rem',
-          fontSize: '0.82rem',
-          fontWeight: 700,
-          cursor: 'pointer',
-          transition: 'all 0.15s ease',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-2px) scale(1.02)';
-          e.currentTarget.style.boxShadow = '0 8px 26px rgba(37, 99, 235, 0.6)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'none';
-          e.currentTarget.style.boxShadow = '0 6px 20px rgba(37, 99, 235, 0.45)';
-        }}
-      >
-        <Sparkles size={16} />
-        <span>Ask RAG OS Copilot</span>
-      </button>
-
       {/* Global Interactive RAG OS Copilot Drawer */}
       <RAGCopilotDrawer
         isOpen={isRAGOpen}
         onClose={() => setIsRAGOpen(false)}
-        processes={processes}
+        processes={simulatedSnapshot.processes}
         results={results}
-        quantum={quantum}
+        quantum={simulatedSnapshot.quantum}
         fingerprint={fingerprint}
-        anomalies={results ? detectAnomalies(processes, results, quantum, processNames) : []}
+        anomalies={results ? detectAnomalies(simulatedSnapshot.processes, results, simulatedSnapshot.quantum, simulatedSnapshot.processNames) : []}
         initialQuestion={ragInitialQuestion}
       />
     </>

@@ -332,7 +332,7 @@ export const AIRecommendationPanel: React.FC<AIRecommendationPanelProps> = ({
         </div>
       </div>
 
-      {/* Warnings in a yellow warning box */}
+      {/* Warnings in an alert notification banner */}
       {warnings.length > 0 && (
         <div
           style={{
@@ -340,7 +340,7 @@ export const AIRecommendationPanel: React.FC<AIRecommendationPanelProps> = ({
             border: '1px solid var(--yellow)',
             borderRadius: '6px',
             padding: '0.75rem 1rem',
-            marginBottom: '1rem',
+            marginBottom: '0.5rem',
             display: 'flex',
             flexDirection: 'column',
             gap: '0.35rem',
@@ -366,130 +366,6 @@ export const AIRecommendationPanel: React.FC<AIRecommendationPanelProps> = ({
           ))}
         </div>
       )}
-
-      {/* Fingerprint data row showing: burstCV, arrivalDensity, priorityEntropy, starvationRiskScore, heavyTailScore as small labeled stat chips */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-          gap: '0.6rem',
-        }}
-      >
-        <div
-          style={{
-            background: 'var(--surface-secondary)',
-            border: '1px solid var(--border)',
-            borderRadius: '6px',
-            padding: '0.5rem 0.75rem',
-          }}
-        >
-          <span style={{ fontSize: '0.68rem', color: 'var(--dim)', display: 'block' }}>
-            burstCV (σ/μ)
-          </span>
-          <span
-            style={{
-              fontFamily: 'IBM Plex Mono, monospace',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: 'var(--text)',
-            }}
-          >
-            {fingerprint.burstCV.toFixed(2)}
-          </span>
-        </div>
-
-        <div
-          style={{
-            background: 'var(--surface-secondary)',
-            border: '1px solid var(--border)',
-            borderRadius: '6px',
-            padding: '0.5rem 0.75rem',
-          }}
-        >
-          <span style={{ fontSize: '0.68rem', color: 'var(--dim)', display: 'block' }}>
-            arrivalDensity
-          </span>
-          <span
-            style={{
-              fontFamily: 'IBM Plex Mono, monospace',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: 'var(--text)',
-            }}
-          >
-            {fingerprint.arrivalDensity.toFixed(2)}
-          </span>
-        </div>
-
-        <div
-          style={{
-            background: 'var(--surface-secondary)',
-            border: '1px solid var(--border)',
-            borderRadius: '6px',
-            padding: '0.5rem 0.75rem',
-          }}
-        >
-          <span style={{ fontSize: '0.68rem', color: 'var(--dim)', display: 'block' }}>
-            priorityEntropy
-          </span>
-          <span
-            style={{
-              fontFamily: 'IBM Plex Mono, monospace',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: 'var(--text)',
-            }}
-          >
-            {fingerprint.priorityEntropy.toFixed(2)}
-          </span>
-        </div>
-
-        <div
-          style={{
-            background: 'var(--surface-secondary)',
-            border: '1px solid var(--border)',
-            borderRadius: '6px',
-            padding: '0.5rem 0.75rem',
-          }}
-        >
-          <span style={{ fontSize: '0.68rem', color: 'var(--dim)', display: 'block' }}>
-            starvationRiskScore
-          </span>
-          <span
-            style={{
-              fontFamily: 'IBM Plex Mono, monospace',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: fingerprint.starvationRiskScore > 0.5 ? 'var(--red)' : 'var(--text)',
-            }}
-          >
-            {fingerprint.starvationRiskScore.toFixed(2)}
-          </span>
-        </div>
-
-        <div
-          style={{
-            background: 'var(--surface-secondary)',
-            border: '1px solid var(--border)',
-            borderRadius: '6px',
-            padding: '0.5rem 0.75rem',
-          }}
-        >
-          <span style={{ fontSize: '0.68rem', color: 'var(--dim)', display: 'block' }}>
-            heavyTailScore
-          </span>
-          <span
-            style={{
-              fontFamily: 'IBM Plex Mono, monospace',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              color: 'var(--text)',
-            }}
-          >
-            {fingerprint.heavyTailScore.toFixed(2)}
-          </span>
-        </div>
-      </div>
     </div>
   );
 };

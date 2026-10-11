@@ -189,21 +189,35 @@ export const WORKLOAD_PRESETS: PresetWorkload[] = [
   },
 ];
 
-export function generateRandomMultiProcessWorkload(count: number = 8): {
+// Deterministic 32-bit PRNG (Mulberry32) for reproducible workload benchmarking (CPU-023)
+function createSeededPRNG(seed: number) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function generateRandomMultiProcessWorkload(count: number = 8, seed?: number): {
   processes: ProcessInput[];
   quantum: number;
+  seed: number;
 } {
   const safeCount = Math.max(4, Math.min(count, 14));
+  const activeSeed = seed !== undefined ? Math.floor(seed) : Math.floor(Date.now() % 1000000) + 1;
+  const rng = createSeededPRNG(activeSeed);
   const processes: ProcessInput[] = [];
   let currentArrival = 0;
 
   for (let i = 0; i < safeCount; i++) {
     // Stagger arrival times between 0 and 15
     if (i > 0) {
-      currentArrival += Math.floor(Math.random() * 3); // +0, 1, or 2
+      currentArrival += Math.floor(rng() * 3); // +0, 1, or 2
     }
-    const burst = Math.floor(Math.random() * 9) + 2; // 2 to 10
-    const priority = Math.floor(Math.random() * 5) + 1; // 1 to 5
+    const burst = Math.floor(rng() * 9) + 2; // 2 to 10
+    const priority = Math.floor(rng() * 5) + 1; // 1 to 5
 
     processes.push({
       id: i,
@@ -216,5 +230,5 @@ export function generateRandomMultiProcessWorkload(count: number = 8): {
   const avgBurst = Math.round(processes.reduce((acc, p) => acc + p.burst, 0) / processes.length);
   const quantum = Math.max(2, Math.min(Math.round(avgBurst * 0.5), 5));
 
-  return { processes, quantum };
+  return { processes, quantum, seed: activeSeed };
 }

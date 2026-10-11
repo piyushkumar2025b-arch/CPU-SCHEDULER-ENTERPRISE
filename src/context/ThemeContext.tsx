@@ -19,9 +19,12 @@ const STORAGE_KEY = 'cpu_scheduler_theme';
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
-      if (saved === 'light' || saved === 'dark') return saved;
-      // Default to dark mode
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
+        if (saved === 'light' || saved === 'dark') return saved;
+      } catch {
+        // Storage restricted or disabled
+      }
       return 'dark';
     }
     return 'dark';
@@ -35,7 +38,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       document.body.classList.remove('light', 'dark');
       document.body.classList.add(theme);
     }
-    localStorage.setItem(STORAGE_KEY, theme);
+    try {
+      localStorage.setItem(STORAGE_KEY, theme);
+    } catch {
+      // Storage restricted or quota exceeded
+    }
   }, [theme]);
 
   const toggleTheme = () => {
